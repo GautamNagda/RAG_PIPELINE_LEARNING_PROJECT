@@ -1,23 +1,35 @@
-"""Retrieval, prompt construction, and local Ollama generation."""
+"""Retrieval, prompt construction, and Groq generation for CollegeNotesAI."""
+
 from __future__ import annotations
+
 import logging
 import math
+import os
 import re
 import time
 from typing import Any, Callable, Sequence
 
 from .config import (
-    AnswerTimings, ConfigurationError, GenerationError, IndexErrorRag,
-    LOGGER, RetrievalError, Settings, SourceChunk,
+    AnswerTimings,
+    ConfigurationError,
+    GenerationError,
+    IndexErrorRag,
+    LOGGER,
+    RetrievalError,
+    Settings,
+    SourceChunk,
 )
+
 
 def validate_question(question: str, settings: Settings) -> str:
     """Normalize a question and reject empty or excessively long input."""
     if not isinstance(question, str):
         raise ConfigurationError("Question must be text. Enter a question about your notes.")
+
     normalized = question.strip()
     if not normalized:
         raise ConfigurationError("Question is empty. Enter a question about your notes.")
+
     if len(normalized) > settings.max_question_chars:
         raise ConfigurationError(
             f"Question is {len(normalized)} characters; limit is "
@@ -26,22 +38,26 @@ def validate_question(question: str, settings: Settings) -> str:
     return normalized
 
 
-def open_index(settings: Settings, chroma_client_factory: Callable[..., Any] | None = None) -> Any:
-    """Open an existing persistent collection; never create an empty index silently."""
+def open_index(
+    settings: Settings,
+    chroma_client_factory: Callable[..., Any] | None = None,
+) -> Any:
+    """Open and validate an existing ChromaDB collection without creating one silently."""
     if not settings.db_path.is_dir():
         raise IndexErrorRag(
-            f"ChromaDB directory not found: {settings.db_path}. "
-            "Run build_index.py first, then retry."
+            f"ChromaDB directory not found: {settings.db_path}. Run build_index.py first, then retry."
         )
+
     if chroma_client_factory is None:
         try:
             import chromadb
         except ImportError as exc:
             raise IndexErrorRag(
-                "ChromaDB is not installed in this Python environment. Run: "
-                ".\\.venv\\Scripts\\python.exe -m pip install chromadb"
+                "ChromaDB is not installed in this Python environment. Install it with: "
+                "python -m pip install chromadb"
             ) from exc
         chroma_client_factory = chromadb.PersistentClient
+
     try:
         client = chroma_client_factory(path=str(settings.db_path))
         collection = client.get_collection(name=settings.collection_name)
@@ -50,10 +66,12 @@ def open_index(settings: Settings, chroma_client_factory: Callable[..., Any] | N
             raise IndexErrorRag(
                 f"Collection '{settings.collection_name}' is empty. Run build_index.py to populate it."
             )
+
         sample = collection.get(limit=1, include=["documents", "metadatas", "embeddings"])
         documents = sample.get("documents") or []
         metadatas = sample.get("metadatas") or []
         embeddings = sample.get("embeddings")
+
         if not documents or not isinstance(documents[0], str) or not documents[0].strip():
             raise IndexErrorRag("The index contains an empty or unreadable document; rebuild it.")
         if not metadatas or not isinstance(metadatas[0], dict) or "page" not in metadatas[0]:
@@ -66,7 +84,12 @@ def open_index(settings: Settings, chroma_client_factory: Callable[..., Any] | N
             raise IndexErrorRag("Index page numbers must be positive. Rebuild the index.")
         if embeddings is None or len(embeddings) < 1:
             raise IndexErrorRag("The index has no stored embeddings. Rebuild it using build_index.py.")
-        LOGGER.info("Validated ChromaDB collection '%s' with %d records.", settings.collection_name, count)
+
+        LOGGER.info(
+            "Validated ChromaDB collection '%s' with %d records.",
+            settings.collection_name,
+            count,
+        )
         return collection
     except IndexErrorRag:
         raise
@@ -79,14 +102,15 @@ def open_index(settings: Settings, chroma_client_factory: Callable[..., Any] | N
 
 
 def load_embedding_model(model_name: str) -> Any:
-    """Load the local embedding model only when retrieval is requested."""
+    """Load the Sentence Transformers embedding model when retrieval is requested."""
     try:
         from sentence_transformers import SentenceTransformer
     except ImportError as exc:
         raise RetrievalError(
-            "sentence-transformers is not installed. Run: "
-            ".\\.venv\\Scripts\\python.exe -m pip install sentence-transformers"
+            "sentence-transformers is not installed. Install it with: "
+            "python -m pip install sentence-transformers"
         ) from exc
+
     try:
         return SentenceTransformer(model_name)
     except Exception as exc:
@@ -103,7 +127,7 @@ def retrieve_context(
     collection: Any,
     embedding_model: Any,
 ) -> list[SourceChunk]:
-    """Retrieve and validate candidate passages; optionally apply a calibrated distance cutoff."""
+    """Retrieve and validate candidate passages, optionally applying a distance cutoff."""
     question = validate_question(question, settings)
     try:
         vector = embedding_model.encode([question], show_progress_bar=False)
@@ -153,6 +177,7 @@ def retrieve_context(
             raise RetrievalError("A search result has invalid page metadata. Rebuild the index.") from exc
         if page < 1:
             raise RetrievalError("A search result has a page number below 1. Rebuild the index.")
+
         distance: float | None = None
         if distances and distances[0] and index < len(distances[0]):
             try:
@@ -161,13 +186,17 @@ def retrieve_context(
                 raise RetrievalError("A search result has a non-numeric distance value.") from exc
             if not math.isfinite(distance):
                 raise RetrievalError("A search result has a non-finite distance value.")
+
         LOGGER.debug("Retrieved candidate page=%s distance=%s text=%r", page, distance, text.strip()[:160])
         if settings.max_retrieval_distance is not None:
             if distance is None:
-                raise RetrievalError("A search result is missing its distance; cannot apply RAG_MAX_DISTANCE.")
+                raise RetrievalError(
+                    "A search result is missing its distance; cannot apply RAG_MAX_DISTANCE."
+                )
             if distance > settings.max_retrieval_distance:
                 LOGGER.debug("Discarding page %s due to configured distance cutoff.", page)
                 continue
+
         key = (page, text.strip())
         if key in seen:
             continue
@@ -177,18 +206,21 @@ def retrieve_context(
 
 
 def answer_style(question: str) -> str:
-    """Choose concise default instructions or a format matched to the question."""
+    """Choose response formatting based on the user's question."""
     normalized = question.casefold()
-    detail_requested = bool(re.search(
-        r"\b(in detail|detailed|elaborate|thorough|comprehensive|step by step|step-by-step|"
-        r"long answer|10 marks|15 marks|explain fully|in depth)\b", normalized
-    ))
+    detail_requested = bool(
+        re.search(
+            r"\b(in detail|detailed|elaborate|thorough|comprehensive|step by step|step-by-step|"
+            r"long answer|10 marks|15 marks|explain fully|in depth)\b",
+            normalized,
+        )
+    )
     if detail_requested:
         return (
             "The user explicitly requested detail. Give a structured explanation with relevant headings, "
             "key points, and examples only when supported by the notes. Be complete but avoid repetition."
         )
-    if re.search(r"\b(compare|comparison|differentiate|difference between|distinguish|\bvs\.?\b|versus)\b", normalized):
+    if re.search(r"\b(compare|comparison|differentiate|difference between|distinguish|versus)\b", normalized):
         return "Use a compact comparison table or paired bullets. Include only dimensions relevant to the question."
     if re.search(r"\b(list|name|types|functions|features|advantages|disadvantages|steps|components|causes)\b", normalized):
         return "Give a direct one-line introduction if needed, then a concise numbered or bulleted list."
@@ -203,6 +235,7 @@ def build_prompt(question: str, sources: Sequence[SourceChunk], max_context_char
         raise RetrievalError("No relevant note passages were retrieved.")
     if max_context_chars < 1:
         raise ConfigurationError("max_context_chars must be positive.")
+
     context_parts: list[str] = []
     used = 0
     for number, source in enumerate(sources, start=1):
@@ -212,9 +245,9 @@ def build_prompt(question: str, sources: Sequence[SourceChunk], max_context_char
         if available <= 0:
             LOGGER.warning("Context limit reached; later retrieved passages were omitted.")
             break
+
         text = source.text.strip()
         if len(text) > available:
-            # Prefer a sentence boundary, then a word boundary, instead of cutting a word in half.
             cut = text[:available]
             sentence_boundary = max(cut.rfind(". "), cut.rfind("? "), cut.rfind("! "))
             if sentence_boundary >= available // 2:
@@ -225,11 +258,13 @@ def build_prompt(question: str, sources: Sequence[SourceChunk], max_context_char
             LOGGER.warning("Retrieved context exceeded the configured character limit; final passage was truncated.")
         if not text:
             continue
+
         piece = label + text
         context_parts.append(piece)
         used += len(separator) + len(piece)
         if used >= max_context_chars:
             break
+
     if not context_parts:
         raise RetrievalError("Retrieved passages could not fit within the context limit.")
 
@@ -259,77 +294,76 @@ SYSTEM_PROMPT = (
 )
 
 
-def _response_content(response: Any) -> str:
-    """Extract message text from supported Ollama response object shapes."""
-    if isinstance(response, dict):
-        message = response.get("message", {})
-        content = message.get("content", "") if isinstance(message, dict) else ""
-        # Retain compatibility with a fake/older generate-shaped response during local migration.
-        if not content:
-            content = response.get("response", "")
-        return content if isinstance(content, str) else ""
-    message = getattr(response, "message", None)
-    content = getattr(message, "content", "") if message is not None else ""
-    if not content:
-        content = getattr(response, "response", "")
-    return content if isinstance(content, str) else ""
-
-
 def generate_answer_with_timing(
     prompt: str,
     settings: Settings,
     ollama_client: Any | None = None,
 ) -> tuple[str, float]:
-    """Generate an answer and measure the Ollama request's wall-clock duration."""
-    if ollama_client is None:
-        try:
-            import ollama
-        except ImportError as exc:
-            raise GenerationError(
-                "The Ollama Python package is not installed. Run: "
-                ".\\.venv\\Scripts\\python.exe -m pip install ollama"
-            ) from exc
-        try:
-            ollama_client = ollama.Client(host=settings.ollama_host, timeout=120)
-        except (ValueError, TypeError) as exc:
-            raise ConfigurationError(f"Invalid Ollama host setting '{settings.ollama_host}'.") from exc
+    """Generate an answer through Groq and return the answer plus elapsed seconds.
 
-    # Start immediately before the request so client construction is not counted as model time.
+    ``ollama_client`` is retained only for compatibility with older callers. It is
+    intentionally not used; this function always calls Groq for hosted generation.
+    """
+    del ollama_client
+    try:
+        from groq import Groq
+    except ImportError as exc:
+        raise GenerationError(
+            "Groq SDK is not installed. Install it with: python -m pip install groq"
+        ) from exc
+
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    # Streamlit Cloud secrets are exposed as environment variables by Streamlit in
+    # some deployment setups; also read st.secrets when running inside Streamlit.
+    if not api_key:
+        try:
+            import streamlit as st
+            api_key = str(st.secrets.get("GROQ_API_KEY", "")).strip()
+        except Exception:
+            api_key = ""
+    if not api_key:
+        raise GenerationError("GROQ_API_KEY is missing. Add it to Streamlit Cloud Secrets or your local environment.")
+
+    model_name = os.getenv("GROQ_MODEL", "").strip()
+    if not model_name:
+        try:
+            import streamlit as st
+            model_name = str(st.secrets.get("GROQ_MODEL", "openai/gpt-oss-20b")).strip()
+        except Exception:
+            model_name = "openai/gpt-oss-20b"
+    model_name = model_name or "openai/gpt-oss-20b"
+
+    try:
+        client = Groq(api_key=api_key)
+    except Exception as exc:
+        raise ConfigurationError(f"Could not initialize the Groq client: {exc}") from exc
+
     started_at = time.perf_counter()
     try:
-        response = ollama_client.chat(
-            model=settings.ollama_model,
+        response = client.chat.completions.create(
+            model=model_name,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
-            stream=False,
-            options={"temperature": settings.temperature},
+            temperature=settings.temperature,
         )
+        answer = response.choices[0].message.content
     except Exception as exc:
-        LOGGER.exception("Ollama generation failed.")
-        message = str(exc).lower()
-        if "not found" in message and ("model" in message or settings.ollama_model.lower() in message):
-            raise GenerationError(
-                f"Ollama model '{settings.ollama_model}' is not available. Download it with: "
-                f"ollama pull {settings.ollama_model}"
-            ) from exc
+        LOGGER.exception("Groq generation failed.")
         raise GenerationError(
-            f"Could not reach or use Ollama at {settings.ollama_host}. Start Ollama and verify the model "
-            f"with 'ollama list'. Original error: {exc}"
+            "The Groq model request failed. Check your API key, model name, network connection, "
+            "and API rate limits. Original error: " + str(exc)
         ) from exc
-    model_seconds = time.perf_counter() - started_at
 
-    answer = _response_content(response).strip()
-    if not answer:
-        raise GenerationError(
-            "Ollama returned an empty answer. Retry once; if it repeats, check the model and available memory."
-        )
-    return answer, model_seconds
+    model_seconds = time.perf_counter() - started_at
+    if not isinstance(answer, str) or not answer.strip():
+        raise GenerationError("The hosted model returned an empty answer. Please retry.")
+    return answer.strip(), model_seconds
 
 
 def generate_answer(prompt: str, settings: Settings, ollama_client: Any | None = None) -> str:
-    """Generate an answer through Ollama, preserving the original string-returning API."""
+    """Generate an answer through Groq while preserving the original string-returning API."""
     answer, _ = generate_answer_with_timing(prompt, settings, ollama_client)
     return answer
 
@@ -391,7 +425,7 @@ def format_result(
     sources: Sequence[SourceChunk],
     timings: AnswerTimings | None = None,
 ) -> str:
-    """Display answer, source pages, and optional measured durations."""
+    """Display the answer, source pages, and optional measured durations."""
     pages = sorted({source.page for source in sources})
     page_text = ", ".join(str(page) for page in pages)
     output = f"\nAnswer:\n{answer}\n\nRetrieved source pages: {page_text}"
@@ -402,5 +436,3 @@ def format_result(
             f"\nTotal question-to-answer time: {timings.total_seconds:.2f} seconds"
         )
     return output
-
-
