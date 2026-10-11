@@ -16,7 +16,7 @@ hf_cache/
 .cache_huggingface/
 
 # Local database
-chroma_db/
+
 *.sqlite3
 *.db
 
