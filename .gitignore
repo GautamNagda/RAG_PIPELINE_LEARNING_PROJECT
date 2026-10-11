@@ -1,0 +1,26 @@
+# Local Python environment
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Local AI model cache
+hf_cache/
+.cache/
+.cache_huggingface/
+
+# Local database
+chroma_db/
+*.sqlite3
+*.db
+
+# Editor files
+.vscode/
+.DS_Store
+Thumbs.db

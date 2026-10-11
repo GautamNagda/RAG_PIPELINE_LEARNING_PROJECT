@@ -1,0 +1,15 @@
+CollegeNotesAI Milestone 6 — Verification report
+
+Executed in the packaging environment:
+- Python compile check: PASS (python -m compileall -q .)
+- Offline unit tests: PASS — 32 tests (python -m unittest discover -s tests -v)
+  - 27 existing RAG/configuration tests
+  - 2 backend service tests
+  - 3 UI control-flow smoke tests using a Streamlit test double
+- Backward-compatible CLI help: PASS (python rag_chat.py --help)
+
+Not executed:
+- Real Streamlit browser launch: Streamlit is not installed in the packaging environment.
+- Live Ollama + actual ChromaDB integration: the user's local Windows project, index, and Ollama service are not accessible from this environment.
+
+The offline tests use fakes for ChromaDB and Ollama, and a test double for Streamlit. They validate control flow and failure handling, not real UI rendering or answer quality from the local model. Run the real app in D:\CollegeNotesAI after installing requirements-ui.txt and verify with a question.
