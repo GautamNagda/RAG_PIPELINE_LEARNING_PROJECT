@@ -1,3 +1,4 @@
 # Install into the existing .venv; these complement the Milestone 5 dependencies.
 streamlit>=1.39,<2
 chromadb
+sentence-transformers
