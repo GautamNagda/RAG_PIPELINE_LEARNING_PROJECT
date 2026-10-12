@@ -16,14 +16,93 @@ st.set_page_config(page_title="CollegeNotesAI", page_icon="🎓", layout="wide")
 st.markdown("""
 <style>
 :root { --cn-primary: #6558d3; }
-.block-container { max-width: 1000px; padding-top: 2rem; padding-bottom: 3rem; }
-.cn-hero { padding: 1.3rem 1.5rem; border: 1px solid rgba(128,128,128,.22); border-radius: 18px; margin-bottom: 1rem; }
-.cn-subtitle { color: var(--text-color); opacity: .72; margin-top: -.4rem; }
-.cn-chip { display: inline-block; border: 1px solid rgba(128,128,128,.28); border-radius: 999px; padding: .25rem .65rem; font-size: .8rem; margin-right: .35rem; }
-[data-testid="stChatMessage"] { border-radius: 14px; }
+.block-container {
+    width: 100%;
+    max-width: 1000px;
+    padding: 2rem clamp(1rem, 3vw, 2rem) 3rem;
+}
+.cn-hero {
+    padding: 1.3rem 1.5rem;
+    border: 1px solid rgba(128,128,128,.22);
+    border-radius: 18px;
+    margin-bottom: 1rem;
+    overflow-wrap: anywhere;
+}
+.cn-title {
+    font-size: 2rem;
+    line-height: 1.2;
+    font-weight: 750;
+    letter-spacing: -.025em;
+}
+.cn-subtitle {
+    color: var(--text-color);
+    opacity: .72;
+    margin-top: .25rem;
+    margin-bottom: .75rem;
+    line-height: 1.5;
+}
+.cn-chip {
+    display: inline-block;
+    border: 1px solid rgba(128,128,128,.28);
+    border-radius: 999px;
+    padding: .25rem .65rem;
+    font-size: .8rem;
+    margin: .15rem .35rem .15rem 0;
+}
+[data-testid="stChatMessage"] { border-radius: 14px; min-width: 0; }
+[data-testid="stChatMessageContent"],
+[data-testid="stMarkdownContainer"] {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+[data-testid="stMarkdownContainer"] pre,
+[data-testid="stMarkdownContainer"] table {
+    max-width: 100%;
+    overflow-x: auto;
+}
+@media (max-width: 768px) {
+    [data-testid="stAppViewContainer"] .main .block-container {
+        width: 100%;
+        max-width: 100%;
+        padding: 1rem .85rem calc(5rem + env(safe-area-inset-bottom));
+    }
+    .cn-hero { padding: 1rem; border-radius: 14px; margin-bottom: .85rem; }
+    .cn-title { font-size: 1.55rem !important; line-height: 1.25; }
+    .cn-subtitle { font-size: .94rem; margin-top: .45rem; }
+    .cn-chip { font-size: .75rem; padding: .25rem .55rem; margin-right: .2rem; }
+    h1, h2, h3 { overflow-wrap: anywhere; }
+    [data-testid="stChatMessage"] { padding: .7rem .75rem; gap: .5rem; }
+    [data-testid="stChatInput"] { padding-bottom: env(safe-area-inset-bottom); }
+    [data-testid="stExpander"] { border-radius: 12px; }
+    [data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) {
+        flex-wrap: wrap !important;
+        gap: .45rem !important;
+    }
+    [data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) > [data-testid="column"] {
+        flex: 1 1 100% !important;
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    [data-testid="stMetric"] {
+        padding: .65rem .75rem;
+        border: 1px solid rgba(128,128,128,.18);
+        border-radius: 12px;
+    }
+    [data-testid="stMetricValue"] { font-size: 1.25rem; overflow-wrap: anywhere; }
+    [data-testid="stSidebar"] { min-width: 0; }
+    button, input, textarea { font-size: 16px !important; }
+}
+@media (max-width: 380px) {
+    [data-testid="stAppViewContainer"] .main .block-container {
+        padding-left: .65rem;
+        padding-right: .65rem;
+    }
+    .cn-title { font-size: 1.4rem !important; }
+    [data-testid="stChatMessage"] { padding: .55rem; }
+}
 </style>
 <div class="cn-hero">
-  <div style="font-size:2rem;font-weight:750;">🎓 CollegeNotesAI</div>
+  <div class="cn-title">🎓 CollegeNotesAI</div>
   <p class="cn-subtitle">Your local AI study assistant — ask questions grounded in your college notes.</p>
   <span class="cn-chip">Runs locally</span><span class="cn-chip">Source pages</span><span class="cn-chip">No paid API</span>
 </div>
